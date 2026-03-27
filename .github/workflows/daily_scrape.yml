@@ -2,7 +2,7 @@ name: Idealz Daily Price Intelligence
 
 on:
   schedule:
-    - cron: '30 2 * * *'   # 8:00 AM Sri Lanka Time (UTC+5:30) = 02:30 UTC
+    - cron: '30 3 * * *'   # 9:00 AM Sri Lanka Time (UTC+5:30) = 03:30 UTC
   workflow_dispatch:         # Manual trigger button in GitHub UI
 
 env:
