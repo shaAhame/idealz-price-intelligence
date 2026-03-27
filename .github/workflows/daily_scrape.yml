@@ -5,46 +5,45 @@ on:
     - cron: '30 2 * * *'   # 8:00 AM Sri Lanka Time (UTC+5:30) = 02:30 UTC
   workflow_dispatch:         # Manual trigger button in GitHub UI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # fixes Node.js deprecation warning
+
 jobs:
   scrape-and-report:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
-      # ── 1. Get the code ──────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Set up Python ─────────────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      # ── 3. Install dependencies ──────────────────────────────────
+      # ── Set today's date once — used by all steps below ──────────────────────
+      - name: Set report date
+        run: echo "REPORT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
       - name: Install Python packages
-        run: |
-          pip install playwright jinja2
+        run: pip install playwright jinja2
 
       - name: Install Chromium browser
         run: playwright install chromium --with-deps
 
-      # ── 4. Run the scraper ───────────────────────────────────────
       - name: Scrape all 6 competitor sites
         run: python scraper.py
         env:
           PYTHONUNBUFFERED: "1"
 
-      # ── 5. Build the HTML dashboard ──────────────────────────────
       - name: Generate CEO dashboard
         run: python dashboard.py
 
-      # ── 6. Build the email report ────────────────────────────────
       - name: Generate email report
         run: python email_report.py
 
-      # ── 7. Send email to both recipients ─────────────────────────
       - name: Send price report email
         uses: dawidd6/action-send-mail@v3
         with:
@@ -59,7 +58,6 @@ jobs:
           html_body: file://data/email_report.html
           attachments: data/prices_${{ env.REPORT_DATE }}.csv
 
-      # ── 8. Save all files as artifacts (30-day history) ──────────
       - name: Upload report artifacts
         uses: actions/upload-artifact@v4
         if: always()
@@ -74,7 +72,6 @@ jobs:
             logs/
           retention-days: 30
 
-      # ── 9. Commit latest data back to repo (optional history) ────
       - name: Commit scraped data to repo
         run: |
           git config user.name "Idealz Price Bot"
