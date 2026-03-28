@@ -1,56 +1,33 @@
 """
-dashboard.py — Idealz.lk CEO Price Intelligence Dashboard (v4)
+dashboard.py — Idealz.lk Live Price Intelligence Dashboard (v5)
 ================================================================
-Reads the latest scraped JSON data and generates a rich HTML dashboard with:
+Generates a fully self-contained HTML file — no server needed.
+The entire scraped dataset is embedded as JSON inside the HTML.
+Open in any browser. Works offline.
 
-  Tab 1 — Brand Summary     : All brands × all shops, lowest price per variant
-  Tab 2 — Shop Comparison   : Side-by-side price table per shop
-  Tab 3 — Price Gap Finder  : Products where competitors vary most in price
-  Tab 4 — Full Price List   : Every product + every variant, searchable + filterable
+Features:
+  - Product search + filter by Brand / Storage / Shop / Price range
+  - Product cards with price comparison across all shops
+  - Charts: brand coverage, shop comparison bar chart, price gap heatmap
+  - CEO summary: top opportunities, market position
+  - Fully responsive, works on mobile
 
 Usage:
-  python dashboard.py           # generates from latest data file
-  python dashboard.py --open    # auto-opens in browser after generating
+  python dashboard.py          # uses latest data file
+  python dashboard.py --open   # auto-opens in browser
 """
 
 import json
 import os
 import sys
-import argparse
 import re
+import argparse
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
-
-# ── BRAND DETECTION ───────────────────────────────────────────────────────────
-
-BRAND_KEYWORDS = {
-    "Apple":        ["iphone", "ipad", "macbook", "airpod", "apple watch", "imac", "mac mini", "mac studio"],
-    "Samsung":      ["samsung", "galaxy"],
-    "Google":       ["google pixel", "pixel"],
-    "Sony":         ["sony"],
-    "OnePlus":      ["oneplus", "one plus"],
-    "Xiaomi":       ["xiaomi", "redmi", "poco"],
-    "Oppo":         ["oppo"],
-    "Realme":       ["realme"],
-    "Vivo":         ["vivo"],
-    "Infinix":      ["infinix"],
-    "Tecno":        ["tecno"],
-    "Honor":        ["honor"],
-    "Nokia":        ["nokia"],
-    "Nothing":      ["nothing", "cmf"],
-    "JBL":          ["jbl"],
-    "Marshall":     ["marshall"],
-    "Anker":        ["anker", "soundcore"],
-    "Bose":         ["bose"],
-    "DJI":          ["dji", "osmo", "insta360"],
-    "PlayStation":  ["playstation", "ps5", "ps4"],
-    "Dyson":        ["dyson"],
-    "Other":        [],
-}
 
 SITE_ORDER = [
     "Celltronics",
@@ -66,26 +43,93 @@ SITE_COLORS = {
     "ONEi":             "#8b5cf6",
     "Present Solution": "#10b981",
     "Life Mobile":      "#f59e0b",
-    "LuxuryX":          "#eab308",
+    "LuxuryX":          "#f43f5e",
     "Genius Mobile":    "#ec4899",
+}
+
+BRAND_KEYWORDS = {
+    "Apple":       ["iphone", "ipad", "macbook", "airpod", "apple watch", "imac", "mac mini", "mac studio", "apple"],
+    "Samsung":     ["samsung", "galaxy"],
+    "Google":      ["google pixel", "pixel"],
+    "Sony":        ["sony"],
+    "OnePlus":     ["oneplus"],
+    "Xiaomi":      ["xiaomi", "redmi", "poco"],
+    "Oppo":        ["oppo"],
+    "Realme":      ["realme"],
+    "Vivo":        ["vivo"],
+    "Infinix":     ["infinix"],
+    "Tecno":       ["tecno"],
+    "Honor":       ["honor"],
+    "Nokia":       ["nokia"],
+    "Nothing":     ["nothing", "cmf"],
+    "JBL":         ["jbl"],
+    "Sony Audio":  ["sony wh", "sony wf", "sony ult"],
+    "Anker":       ["anker", "soundcore"],
+    "DJI":         ["dji", "osmo", "insta360"],
+    "PlayStation": ["playstation", "ps5"],
+    "Dyson":       ["dyson"],
+    "Other":       [],
+}
+
+CATEGORY_KEYWORDS = {
+    "Smartphones":  ["iphone", "galaxy", "pixel", "oneplus", "xiaomi", "redmi", "oppo", "realme", "vivo", "infinix", "tecno", "honor", "nokia", "nothing"],
+    "MacBooks":     ["macbook"],
+    "iPads":        ["ipad"],
+    "Tablets":      ["tab ", "tablet"],
+    "Smart Watches":["watch", "band"],
+    "Earbuds":      ["airpod", "buds", "earbuds", "earbud", "wf-", "soundcore", "cmf buds"],
+    "Headphones":   ["headphone", "wh-", "wh1000", "xm5", "xm6"],
+    "Speakers":     ["speaker", "jbl", "soundbar"],
+    "MacBook":      ["macbook"],
+    "Laptops":      ["laptop", "notebook"],
+    "Gaming":       ["playstation", "ps5", "xbox", "meta quest"],
+    "Cameras":      ["dji", "osmo", "insta360", "gopro"],
+    "Accessories":  ["case", "charger", "cable", "adapter", "screen"],
+    "Other":        [],
 }
 
 
 def detect_brand(name):
-    name_lower = name.lower()
-    for brand, keywords in BRAND_KEYWORDS.items():
+    nl = name.lower()
+    for brand, kws in BRAND_KEYWORDS.items():
         if brand == "Other":
             continue
-        for kw in keywords:
-            if kw in name_lower:
+        for kw in kws:
+            if kw in nl:
                 return brand
     return "Other"
 
 
-def fmt_price(p):
-    if p is None:
-        return "—"
-    return f"Rs. {p:,}"
+def detect_category(name):
+    nl = name.lower()
+    for cat, kws in CATEGORY_KEYWORDS.items():
+        if cat == "Other":
+            continue
+        for kw in kws:
+            if kw in nl:
+                return cat
+    return "Other"
+
+
+def extract_storage(variant):
+    """Extract storage label from variant string e.g. '256GB / Black' → '256GB'"""
+    if not variant:
+        return ""
+    m = re.search(r"(\d+\s*(?:GB|TB))", variant, re.IGNORECASE)
+    if m:
+        s = m.group(1).replace(" ", "")
+        return s.upper()
+    return ""
+
+
+def extract_color(variant):
+    """Extract colour from variant string."""
+    if not variant:
+        return ""
+    # Remove storage part
+    cleaned = re.sub(r"\d+\s*(?:GB|TB)", "", variant, flags=re.IGNORECASE)
+    cleaned = cleaned.replace("/", "").strip(" /-")
+    return cleaned if len(cleaned) > 1 else ""
 
 
 def load_latest():
@@ -99,270 +143,151 @@ def load_latest():
     return data, date_str
 
 
-# ── DATA PROCESSING ───────────────────────────────────────────────────────────
-
-def process_data(records):
+def process(records):
     """
-    Builds 3 data structures from raw records:
-
-    1. brand_data:  { brand: { site: { "product_name variant": price } } }
-    2. product_data: { "name|variant": { site: price, url, brand } }
-    3. site_counts:  { site: count }
+    Build a product map: product_key → {name, brand, category, variants: {storage: {site: price}}}
     """
-    brand_data   = defaultdict(lambda: defaultdict(dict))
-    product_data = defaultdict(lambda: {"sites": {}, "brand": "Other", "name": "", "variant": ""})
-    site_counts  = defaultdict(int)
+    products = {}   # key → product dict
 
     for r in records:
         name    = r.get("name", "").strip()
         variant = r.get("variant", "").strip()
         price   = r.get("price")
-        site    = r.get("site", "")
+        site    = r.get("site", "").strip()
         url     = r.get("url", "")
 
         if not name or not price or not site:
             continue
-
-        brand = detect_brand(name)
-        key   = f"{name}|||{variant}"
-
-        # brand_data
-        label = f"{name} {variant}".strip()
-        existing = brand_data[brand][site].get(label)
-        if existing is None or price < existing:
-            brand_data[brand][site][label] = price
-
-        # product_data
-        pd = product_data[key]
-        pd["name"]    = name
-        pd["variant"] = variant
-        pd["brand"]   = brand
-        if site not in pd["sites"] or price < pd["sites"][site]["price"]:
-            pd["sites"][site] = {"price": price, "url": url}
-
-        site_counts[site] += 1
-
-    return brand_data, product_data, site_counts
-
-
-def build_brand_summary(brand_data):
-    """
-    For each brand → for each product variant → lowest price per site.
-    Returns list of rows sorted by brand then product name.
-    """
-    rows = []
-    for brand in sorted(brand_data.keys()):
-        # Collect all product labels across all sites for this brand
-        all_labels = set()
-        for site_products in brand_data[brand].values():
-            all_labels.update(site_products.keys())
-
-        for label in sorted(all_labels):
-            prices = {}
-            for site in SITE_ORDER:
-                p = brand_data[brand].get(site, {}).get(label)
-                if p:
-                    prices[site] = p
-
-            if not prices:
-                continue
-
-            vals        = list(prices.values())
-            market_low  = min(vals)
-            market_high = max(vals)
-            spread      = market_high - market_low
-            spread_pct  = round(spread / market_low * 100, 1) if market_low else 0
-
-            rows.append({
-                "brand":       brand,
-                "label":       label,
-                "prices":      prices,
-                "market_low":  market_low,
-                "market_high": market_high,
-                "spread":      spread,
-                "spread_pct":  spread_pct,
-                "site_count":  len(prices),
-            })
-
-    return rows
-
-
-def build_price_gaps(brand_summary):
-    """Top products sorted by price spread — biggest opportunities."""
-    multi = [r for r in brand_summary if r["site_count"] >= 2]
-    return sorted(multi, key=lambda x: -x["spread"])[:50]
-
-
-# ── HTML GENERATOR ────────────────────────────────────────────────────────────
-
-def generate_html(records, date_str):
-    brand_data, product_data, site_counts = process_data(records)
-    brand_summary = build_brand_summary(brand_data)
-    price_gaps    = build_price_gaps(brand_summary)
-
-    total      = len(records)
-    fmt_date   = datetime.strptime(date_str, "%Y-%m-%d").strftime("%B %d, %Y")
-    all_brands = sorted(set(r["brand"] for r in brand_summary))
-
-    # ── Tab 1: Brand Summary table rows ──────────────────────────────────────
-    brand_rows_html = ""
-    current_brand   = None
-    for row in brand_summary:
-        # Brand header row
-        if row["brand"] != current_brand:
-            current_brand = row["brand"]
-            count = sum(1 for r in brand_summary if r["brand"] == current_brand)
-            brand_rows_html += f"""
-            <tr class="brand-header-row" data-brand="{current_brand}">
-              <td colspan="9" style="padding:10px 14px 6px;font-size:12px;font-weight:700;
-                color:#1e293b;background:#f1f5f9;border-top:2px solid #e2e8f0;
-                letter-spacing:.5px;text-transform:uppercase;">
-                {current_brand} <span style="font-weight:400;color:#94a3b8;font-size:11px;margin-left:6px;">{count} products</span>
-              </td>
-            </tr>"""
-
-        # Price cells
-        cells = ""
-        for site in SITE_ORDER:
-            p = row["prices"].get(site)
-            if p:
-                style = ""
-                badge = ""
-                if p == row["market_low"] and row["site_count"] > 1:
-                    style = "color:#16a34a;font-weight:700;"
-                    badge = '<span style="font-size:9px;background:#dcfce7;color:#15803d;padding:1px 4px;border-radius:3px;margin-left:3px;">LOW</span>'
-                elif p == row["market_high"] and row["site_count"] > 1:
-                    style = "color:#dc2626;"
-                    badge = '<span style="font-size:9px;background:#fee2e2;color:#dc2626;padding:1px 4px;border-radius:3px;margin-left:3px;">HIGH</span>'
-                cells += f'<td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;white-space:nowrap;"><span style="{style}">Rs. {p:,}</span>{badge}</td>'
-            else:
-                cells += '<td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;text-align:right;color:#cbd5e1;font-size:12px;">—</td>'
-
-        spread_html = ""
-        if row["site_count"] > 1:
-            sc = "#dc2626" if row["spread_pct"] >= 15 else "#d97706" if row["spread_pct"] >= 8 else "#64748b"
-            spread_html = f'<span style="font-family:monospace;font-size:11px;color:{sc};">Rs. {row["spread"]:,}<br><span style="font-size:10px;">({row["spread_pct"]}%)</span></span>'
-
-        brand_rows_html += f"""
-        <tr class="product-row" data-brand="{row['brand']}" data-label="{row['label'].lower()}" data-sites="{row['site_count']}">
-          <td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:500;min-width:220px;">{row['label'][:65]}</td>
-          {cells}
-          <td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;text-align:right;">{spread_html}</td>
-        </tr>"""
-
-    # ── Tab 2: Shop-wise summary (each shop as a column, brand as rows) ───────
-    shop_brand_html = ""
-    for brand in all_brands:
-        brand_rows = [r for r in brand_summary if r["brand"] == brand]
-        if not brand_rows:
+        if price < 1000 or price > 5000000:
             continue
 
-        # For each site: count products and show price range
-        site_cells = ""
-        for site in SITE_ORDER:
-            site_prices = [r["prices"][site] for r in brand_rows if site in r["prices"]]
-            if site_prices:
-                lo = min(site_prices)
-                hi = max(site_prices)
-                cnt = len(site_prices)
-                color = SITE_COLORS.get(site, "#64748b")
-                if lo == hi:
-                    price_display = f'Rs. {lo:,}'
-                else:
-                    price_display = f'Rs. {lo:,}<br><span style="font-size:10px;color:#94a3b8;">to Rs. {hi:,}</span>'
-                site_cells += f'''<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;text-align:center;font-size:12px;font-family:monospace;vertical-align:middle;">
-                  <div style="font-weight:600;color:#1e293b;">{price_display}</div>
-                  <div style="font-size:10px;color:{color};margin-top:3px;">{cnt} variant{"s" if cnt!=1 else ""}</div>
-                </td>'''
-            else:
-                site_cells += '<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;text-align:center;color:#e2e8f0;font-size:12px;">—</td>'
+        brand    = detect_brand(name)
+        category = detect_category(name)
+        storage  = extract_storage(variant)
+        color    = extract_color(variant)
 
-        shop_brand_html += f"""
-        <tr class="shop-row" data-brand="{brand}">
-          <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#1e293b;white-space:nowrap;">{brand}</td>
-          {site_cells}
-        </tr>"""
+        # Key = product name (group all variants under same product)
+        pkey = name.lower().strip()
 
-    # ── Tab 3: Price Gap rows ─────────────────────────────────────────────────
-    gap_rows_html = ""
-    for i, row in enumerate(price_gaps, 1):
-        cells = ""
-        for site in SITE_ORDER:
-            p = row["prices"].get(site)
-            if p:
-                style = ""
-                if p == row["market_low"]:
-                    style = "color:#16a34a;font-weight:700;"
-                elif p == row["market_high"]:
-                    style = "color:#dc2626;"
-                cells += f'<td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:monospace;font-size:12px;white-space:nowrap;"><span style="{style}">Rs. {p:,}</span></td>'
-            else:
-                cells += '<td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;text-align:right;color:#cbd5e1;font-size:12px;">—</td>'
+        if pkey not in products:
+            products[pkey] = {
+                "name":     name,
+                "brand":    brand,
+                "category": category,
+                "variants": {},   # storage → {site → {price, url, color}}
+                "all_prices": [],
+            }
 
-        pct = row["spread_pct"]
-        bar_color = "#dc2626" if pct >= 20 else "#d97706" if pct >= 10 else "#64748b"
-        bar_width = min(100, int(pct * 3))
+        p = products[pkey]
 
-        gap_rows_html += f"""
-        <tr class="gap-row" data-brand="{row['brand']}">
-          <td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;font-weight:600;color:#94a3b8;text-align:center;">{i}</td>
-          <td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;font-size:12px;font-weight:600;color:{bar_color};white-space:nowrap;">
-            Rs. {row['spread']:,}<br>
-            <div style="height:4px;background:#f1f5f9;border-radius:2px;margin-top:3px;width:80px;">
-              <div style="height:4px;background:{bar_color};border-radius:2px;width:{bar_width}%;"></div>
-            </div>
-          </td>
-          <td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:{bar_color};font-weight:700;">{pct}%</td>
-          <td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:500;">{row['label'][:60]}</td>
-          <td style="padding:9px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#64748b;font-family:monospace;">{row['brand']}</td>
-          {cells}
-        </tr>"""
+        # Use storage as variant key; if none, use variant text or "Standard"
+        vkey = storage or variant or "Standard"
 
-    # ── Tab 4: Full price list ─────────────────────────────────────────────────
-    full_rows_html = ""
-    for row in brand_summary:
-        cells = ""
-        for site in SITE_ORDER:
-            p = row["prices"].get(site)
-            if p:
-                style = ""
-                if p == row["market_low"] and row["site_count"] > 1:
-                    style = "color:#16a34a;font-weight:700;"
-                elif p == row["market_high"] and row["site_count"] > 1:
-                    style = "color:#dc2626;"
-                cells += f'<td style="padding:8px 10px;border-bottom:1px solid #f8fafc;text-align:right;font-family:monospace;font-size:12px;white-space:nowrap;"><span style="{style}">Rs. {p:,}</span></td>'
-            else:
-                cells += '<td style="padding:8px 10px;border-bottom:1px solid #f8fafc;text-align:right;color:#e2e8f0;font-size:11px;">—</td>'
+        if vkey not in p["variants"]:
+            p["variants"][vkey] = {}
 
-        full_rows_html += f"""
-        <tr class="full-row" data-brand="{row['brand']}" data-label="{row['label'].lower()}">
-          <td style="padding:8px 10px;border-bottom:1px solid #f8fafc;font-size:11px;color:#94a3b8;white-space:nowrap;">{row['brand']}</td>
-          <td style="padding:8px 10px;border-bottom:1px solid #f8fafc;font-size:13px;font-weight:500;">{row['label'][:70]}</td>
-          {cells}
-        </tr>"""
+        existing = p["variants"][vkey].get(site)
+        if existing is None or price < existing["price"]:
+            p["variants"][vkey][site] = {
+                "price": price,
+                "url":   url,
+                "color": color,
+            }
 
-    # ── Site header cells ──────────────────────────────────────────────────────
-    site_headers = "".join(
-        f'<th style="padding:10px 10px;text-align:right;font-size:10px;color:{SITE_COLORS.get(s,"#64748b")};'
-        f'letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #e2e8f0;white-space:nowrap;">{s}</th>'
-        for s in SITE_ORDER
-    )
+        p["all_prices"].append(price)
 
-    # ── Brand filter pills ─────────────────────────────────────────────────────
-    brand_pills = '<button onclick="filterBrand(\'all\',this)" class="bpill active">All</button>'
-    for brand in all_brands:
-        brand_pills += f'<button onclick="filterBrand(\'{brand}\',this)" class="bpill">{brand}</button>'
+    # Compute summary stats per product
+    result = []
+    for pkey, p in products.items():
+        all_p = [
+            info["price"]
+            for vdata in p["variants"].values()
+            for info in vdata.values()
+        ]
+        if not all_p:
+            continue
 
-    # ── Site count summary pills ───────────────────────────────────────────────
-    site_pills = ""
+        # Sites that carry this product
+        sites_carrying = set()
+        for vdata in p["variants"].values():
+            sites_carrying.update(vdata.keys())
+
+        # Market low / high across all variants + sites
+        market_low  = min(all_p)
+        market_high = max(all_p)
+
+        result.append({
+            "name":            p["name"],
+            "brand":           p["brand"],
+            "category":        p["category"],
+            "variants":        p["variants"],
+            "storage_options": sorted(p["variants"].keys()),
+            "sites":           sorted(sites_carrying),
+            "site_count":      len(sites_carrying),
+            "market_low":      market_low,
+            "market_high":     market_high,
+            "spread":          market_high - market_low,
+            "spread_pct":      round((market_high - market_low) / market_low * 100, 1) if market_low else 0,
+        })
+
+    result.sort(key=lambda x: (-x["site_count"], x["name"].lower()))
+    return result
+
+
+def generate_html(records, date_str):
+    products   = process(records)
+    fmt_date   = datetime.strptime(date_str, "%Y-%m-%d").strftime("%B %d, %Y")
+    total_vars = len(records)
+
+    # Site counts
+    site_counts = defaultdict(int)
+    for r in records:
+        site_counts[r.get("site", "")] += 1
+
+    # Brand counts
+    brand_counts = defaultdict(int)
+    for p in products:
+        brand_counts[p["brand"]] += 1
+
+    # All unique values for filters
+    all_brands     = sorted(set(p["brand"]   for p in products))
+    all_categories = sorted(set(p["category"] for p in products))
+    all_storages   = sorted(set(
+        s for p in products for s in p["storage_options"]
+        if s and s != "Standard"
+    ), key=lambda x: (
+        0 if "GB" in x and int(re.search(r"\d+", x).group()) < 100 else
+        1 if "GB" in x else 2,
+        int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 0
+    ))
+
+    # Embed data as JSON for the frontend
+    js_data = json.dumps(products, ensure_ascii=False)
+    js_sites = json.dumps(SITE_ORDER)
+    js_site_colors = json.dumps(SITE_COLORS)
+    js_site_counts = json.dumps(dict(site_counts))
+    js_brand_counts = json.dumps(dict(brand_counts))
+
+    # Build filter pill HTML helpers
+    def pills(items, js_fn, extra=""):
+        out = f'<button class="pill active" onclick="{js_fn}(\'all\',this)">All</button>'
+        for item in items:
+            out += f'<button class="pill" onclick="{js_fn}(\'{item.replace("'","")}\',this)">{item}</button>'
+        return out
+
+    brand_pills    = pills(all_brands,     "filterBrand")
+    cat_pills      = pills(all_categories, "filterCat")
+    storage_pills  = pills(all_storages,   "filterStorage")
+    shop_pills     = pills(SITE_ORDER,     "filterShop")
+
+    site_count_pills = ""
     for site in SITE_ORDER:
-        count = site_counts.get(site, 0)
-        color = SITE_COLORS.get(site, "#64748b")
-        site_pills += f'''<div style="display:inline-block;margin:4px;padding:10px 16px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;border-top:3px solid {color};">
-          <div style="font-size:10px;color:{color};font-weight:700;text-transform:uppercase;letter-spacing:.5px;">{site}</div>
-          <div style="font-size:22px;font-weight:800;color:#1e293b;line-height:1.1;">{count}</div>
-          <div style="font-size:10px;color:#94a3b8;">variants tracked</div>
+        c = site_counts.get(site, 0)
+        col = SITE_COLORS.get(site, "#999")
+        site_count_pills += f'''<div class="site-pill" style="border-top-color:{col}">
+          <div class="site-pill-name" style="color:{col}">{site}</div>
+          <div class="site-pill-count">{c:,}</div>
+          <div class="site-pill-label">variants</div>
         </div>'''
 
     html = f"""<!DOCTYPE html>
@@ -370,357 +295,651 @@ def generate_html(records, date_str):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Idealz.lk — Price Intelligence Dashboard {fmt_date}</title>
+<title>Idealz.lk — Price Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+:root{{
+  --bg:#07090f;
+  --s1:#0d1117;
+  --s2:#161b22;
+  --s3:#21262d;
+  --border:#30363d;
+  --accent:#58a6ff;
+  --green:#3fb950;
+  --red:#f85149;
+  --orange:#d29922;
+  --purple:#bc8cff;
+  --pink:#f778ba;
+  --text:#e6edf3;
+  --muted:#7d8590;
+  --dim:#484f58;
+  --font-d:'Syne',sans-serif;
+  --font-b:'DM Sans',sans-serif;
+  --font-m:'DM Mono',monospace;
+  --rad:8px;
+  --rad-lg:12px;
+}}
 *{{margin:0;padding:0;box-sizing:border-box}}
-body{{background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b;min-height:100vh}}
+body{{background:var(--bg);color:var(--text);font-family:var(--font-b);min-height:100vh;font-size:14px}}
 
-/* ── TOP BAR ── */
-.topbar{{background:linear-gradient(135deg,#0f172a,#1e3a5f);padding:18px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}}
-.logo{{font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.5px}}
-.logo span{{color:#38bdf8}}
-.topbar-meta{{display:flex;align-items:center;gap:16px}}
-.badge{{font-size:11px;padding:4px 12px;border-radius:20px;font-weight:600;letter-spacing:.5px}}
-.badge-blue{{background:rgba(56,189,248,.15);color:#38bdf8;border:1px solid rgba(56,189,248,.3)}}
-.badge-green{{background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.25)}}
-.date-lbl{{font-size:11px;color:#94a3b8;font-family:monospace}}
+/* ── TOPBAR ── */
+.topbar{{
+  background:rgba(13,17,23,.95);
+  border-bottom:1px solid var(--border);
+  padding:14px 28px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:200;
+  backdrop-filter:blur(12px);
+}}
+.logo{{font-family:var(--font-d);font-size:18px;font-weight:800;letter-spacing:-0.5px}}
+.logo em{{font-style:normal;color:var(--accent)}}
+.topbar-right{{display:flex;align-items:center;gap:12px}}
+.badge{{font-family:var(--font-m);font-size:10px;padding:3px 10px;border-radius:20px;letter-spacing:.5px}}
+.badge-blue{{background:rgba(88,166,255,.1);color:var(--accent);border:1px solid rgba(88,166,255,.25)}}
+.badge-green{{background:rgba(63,185,80,.1);color:var(--green);border:1px solid rgba(63,185,80,.25)}}
+.topbar-date{{font-family:var(--font-m);font-size:10px;color:var(--muted)}}
 
-/* ── WRAP ── */
-.wrap{{max-width:1700px;margin:0 auto;padding:24px 20px}}
+/* ── LAYOUT ── */
+.layout{{display:grid;grid-template-columns:260px 1fr;min-height:calc(100vh - 53px)}}
 
-/* ── TABS ── */
-.tabs{{display:flex;gap:2px;background:#e2e8f0;border-radius:10px;padding:4px;margin-bottom:24px;width:fit-content}}
-.tab{{font-size:13px;font-weight:600;padding:8px 20px;border:none;background:none;color:#64748b;cursor:pointer;border-radius:7px;transition:all .15s;white-space:nowrap}}
-.tab.active{{background:#fff;color:#1e293b;box-shadow:0 1px 3px rgba(0,0,0,.1)}}
-.tab:hover:not(.active){{color:#1e293b}}
-.tab-panel{{display:none}}
-.tab-panel.active{{display:block}}
+/* ── SIDEBAR ── */
+.sidebar{{
+  background:var(--s1);
+  border-right:1px solid var(--border);
+  padding:20px 16px;
+  position:sticky;
+  top:53px;
+  height:calc(100vh - 53px);
+  overflow-y:auto;
+}}
+.sidebar::-webkit-scrollbar{{width:4px}}
+.sidebar::-webkit-scrollbar-track{{background:transparent}}
+.sidebar::-webkit-scrollbar-thumb{{background:var(--border);border-radius:2px}}
 
-/* ── CARDS ── */
-.card{{background:#fff;border-radius:12px;padding:20px 24px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,.06)}}
+.filter-section{{margin-bottom:24px}}
+.filter-label{{font-family:var(--font-m);font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;display:block}}
 
-/* ── CONTROLS ── */
-.controls{{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}}
-.search-box{{display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:0 12px}}
-.search-box input{{background:none;border:none;outline:none;color:#1e293b;font-size:13px;padding:9px 0;width:260px}}
-.search-box input::placeholder{{color:#94a3b8}}
-select{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;color:#1e293b;font-size:13px;padding:8px 12px;outline:none;cursor:pointer}}
-.cnt{{margin-left:auto;font-size:12px;color:#94a3b8;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 12px}}
-.cnt span{{color:#0ea5e9;font-weight:600}}
+/* Search */
+.search-wrap{{position:relative;margin-bottom:20px}}
+.search-wrap input{{
+  width:100%;background:var(--s2);border:1px solid var(--border);
+  border-radius:var(--rad);color:var(--text);font-family:var(--font-b);
+  font-size:13px;padding:9px 12px 9px 36px;outline:none;transition:border-color .15s;
+}}
+.search-wrap input:focus{{border-color:var(--accent)}}
+.search-wrap input::placeholder{{color:var(--dim)}}
+.search-icon{{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--dim);font-size:14px}}
 
-/* ── BRAND PILLS ── */
-.bpill{{font-size:12px;font-weight:600;padding:5px 14px;border:1px solid #e2e8f0;border-radius:20px;background:#f8fafc;color:#64748b;cursor:pointer;transition:all .15s;white-space:nowrap}}
-.bpill:hover,.bpill.active{{background:#0ea5e9;color:#fff;border-color:#0ea5e9}}
-.brand-pills{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}}
+/* Pills */
+.pill-wrap{{display:flex;flex-wrap:wrap;gap:5px}}
+.pill{{
+  font-size:11px;font-family:var(--font-m);padding:4px 10px;
+  border-radius:20px;border:1px solid var(--border);
+  background:transparent;color:var(--muted);cursor:pointer;
+  transition:all .15s;white-space:nowrap;
+}}
+.pill:hover{{border-color:var(--accent);color:var(--accent)}}
+.pill.active{{background:rgba(88,166,255,.12);border-color:var(--accent);color:var(--accent)}}
 
-/* ── TABLES ── */
-.tbl-wrap{{overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0}}
-table{{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}}
-thead tr{{background:#f8fafc}}
-th{{padding:10px 10px;text-align:left;font-size:10px;color:#94a3b8;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #e2e8f0;white-space:nowrap}}
-tbody tr:hover{{background:#f8fafc}}
-.brand-header-row td{{cursor:pointer}}
+/* Price range */
+.range-wrap{{display:flex;gap:8px;align-items:center}}
+.range-wrap input[type=number]{{
+  flex:1;background:var(--s2);border:1px solid var(--border);
+  border-radius:var(--rad);color:var(--text);font-family:var(--font-m);
+  font-size:12px;padding:7px 10px;outline:none;
+}}
+.range-wrap input:focus{{border-color:var(--accent)}}
+.range-sep{{color:var(--muted);font-size:12px}}
 
-/* ── SECTION TITLES ── */
-.sec-title{{font-size:18px;font-weight:700;color:#1e293b;margin-bottom:4px}}
-.sec-sub{{font-size:13px;color:#64748b;margin-bottom:16px}}
+/* Sort */
+.sort-select{{
+  width:100%;background:var(--s2);border:1px solid var(--border);
+  border-radius:var(--rad);color:var(--text);font-family:var(--font-b);
+  font-size:13px;padding:8px 10px;outline:none;cursor:pointer;
+}}
 
-/* ── STAT CARDS ── */
-.stat-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}}
-.stat-card{{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,.06)}}
-.stat-lbl{{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}}
-.stat-val{{font-size:30px;font-weight:800;color:#0ea5e9;letter-spacing:-1px;line-height:1}}
-.stat-desc{{font-size:12px;color:#64748b;margin-top:4px}}
+/* Result count */
+.result-count{{font-family:var(--font-m);font-size:11px;color:var(--muted);margin-top:16px;text-align:center}}
+.result-count span{{color:var(--accent);font-weight:500}}
 
-@media(max-width:900px){{.stat-grid{{grid-template-columns:repeat(2,1fr)}}.wrap{{padding:12px 10px}}}}
+/* ── MAIN ── */
+.main{{padding:24px 24px;overflow-y:auto}}
+
+/* Stats row */
+.stats-row{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}}
+.stat-card{{
+  background:var(--s1);border:1px solid var(--border);
+  border-radius:var(--rad-lg);padding:16px 18px;
+  position:relative;overflow:hidden;
+}}
+.stat-card::before{{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:var(--accent-color,var(--accent));
+}}
+.stat-label{{font-family:var(--font-m);font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}}
+.stat-val{{font-family:var(--font-d);font-size:28px;font-weight:800;color:var(--accent-color,var(--accent));letter-spacing:-1px;line-height:1}}
+.stat-sub{{font-size:11px;color:var(--muted);margin-top:4px}}
+
+/* Site coverage pills */
+.site-pills-row{{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px}}
+.site-pill{{
+  background:var(--s1);border:1px solid var(--border);
+  border-radius:var(--rad-lg);padding:12px 16px;
+  border-top:3px solid;text-align:center;min-width:120px;
+}}
+.site-pill-name{{font-family:var(--font-m);font-size:10px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px}}
+.site-pill-count{{font-family:var(--font-d);font-size:22px;font-weight:800;color:var(--text);line-height:1}}
+.site-pill-label{{font-size:10px;color:var(--muted);margin-top:2px}}
+
+/* View toggle */
+.view-toggle{{display:flex;gap:4px;margin-bottom:20px}}
+.view-btn{{
+  font-family:var(--font-m);font-size:11px;padding:6px 14px;
+  border:1px solid var(--border);border-radius:var(--rad);
+  background:transparent;color:var(--muted);cursor:pointer;transition:all .15s;
+}}
+.view-btn.active{{background:rgba(88,166,255,.1);border-color:var(--accent);color:var(--accent)}}
+
+/* ── PRODUCT GRID ── */
+#product-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}}
+#product-grid.list-view{{grid-template-columns:1fr}}
+
+/* Product card */
+.product-card{{
+  background:var(--s1);border:1px solid var(--border);
+  border-radius:var(--rad-lg);overflow:hidden;
+  transition:border-color .2s,transform .2s;
+  animation:fadeIn .3s ease;
+}}
+.product-card:hover{{border-color:rgba(88,166,255,.4);transform:translateY(-2px)}}
+@keyframes fadeIn{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:translateY(0)}}}}
+
+.card-header{{padding:14px 16px 10px;border-bottom:1px solid var(--s3)}}
+.card-brand{{font-family:var(--font-m);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}}
+.card-name{{font-size:14px;font-weight:600;color:var(--text);line-height:1.3}}
+.card-meta{{display:flex;align-items:center;gap:8px;margin-top:6px}}
+.cat-badge{{font-family:var(--font-m);font-size:9px;padding:2px 7px;border-radius:20px;background:var(--s3);color:var(--muted);border:1px solid var(--border)}}
+.sites-badge{{font-family:var(--font-m);font-size:9px;padding:2px 7px;border-radius:20px;border:1px solid rgba(88,166,255,.3);color:var(--accent);background:rgba(88,166,255,.08)}}
+
+/* Storage selector tabs */
+.storage-tabs{{display:flex;gap:4px;padding:10px 16px 0;flex-wrap:wrap}}
+.storage-tab{{
+  font-family:var(--font-m);font-size:10px;padding:3px 9px;
+  border-radius:4px;border:1px solid var(--border);
+  background:transparent;color:var(--muted);cursor:pointer;transition:all .12s;
+}}
+.storage-tab:hover{{border-color:var(--accent);color:var(--accent)}}
+.storage-tab.active{{background:rgba(88,166,255,.12);border-color:var(--accent);color:var(--accent)}}
+
+/* Price rows */
+.price-rows{{padding:10px 16px 14px}}
+.price-row{{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:6px 0;border-bottom:1px solid var(--s3);
+}}
+.price-row:last-child{{border-bottom:none}}
+.price-site{{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}}
+.site-dot{{width:7px;height:7px;border-radius:50%;flex-shrink:0}}
+.price-val{{font-family:var(--font-m);font-size:13px;font-weight:500}}
+.price-low{{color:var(--green)}}
+.price-high{{color:var(--red)}}
+.price-mid{{color:var(--text)}}
+.price-na{{color:var(--dim);font-size:11px}}
+.price-link{{text-decoration:none;color:inherit}}
+.price-link:hover .price-val{{text-decoration:underline}}
+
+/* Spread bar */
+.spread-bar{{
+  margin:8px 16px 0;padding:8px 10px;
+  background:var(--s2);border-radius:var(--rad);
+  display:flex;align-items:center;justify-content:space-between;
+  font-family:var(--font-m);font-size:10px;color:var(--muted);
+}}
+.spread-val{{color:var(--orange);font-weight:500}}
+
+/* ── TABLE VIEW ── */
+.tbl-wrap{{overflow-x:auto;border:1px solid var(--border);border-radius:var(--rad-lg)}}
+#product-table{{width:100%;border-collapse:collapse;min-width:800px}}
+#product-table thead tr{{background:var(--s2)}}
+#product-table th{{
+  padding:10px 12px;text-align:left;
+  font-family:var(--font-m);font-size:9px;color:var(--muted);
+  letter-spacing:1.5px;text-transform:uppercase;
+  border-bottom:1px solid var(--border);white-space:nowrap;
+}}
+#product-table th.site-th{{text-align:right;cursor:pointer}}
+#product-table th.site-th:hover{{color:var(--text)}}
+#product-table tbody tr{{border-bottom:1px solid rgba(48,54,61,.5);transition:background .1s}}
+#product-table tbody tr:hover{{background:rgba(88,166,255,.03)}}
+#product-table td{{padding:10px 12px;vertical-align:middle;font-size:12px}}
+.tbl-name{{font-weight:500;font-size:13px}}
+.tbl-variant{{font-family:var(--font-m);font-size:10px;color:var(--muted);margin-top:2px}}
+.tbl-brand{{font-family:var(--font-m);font-size:10px;color:var(--muted)}}
+.tbl-price{{font-family:var(--font-m);font-size:12px;text-align:right;white-space:nowrap}}
+
+/* ── EMPTY STATE ── */
+.empty{{text-align:center;padding:60px 20px;color:var(--muted)}}
+.empty-icon{{font-size:40px;margin-bottom:12px}}
+.empty-text{{font-size:14px}}
+
+/* ── RESPONSIVE ── */
+@media(max-width:900px){{
+  .layout{{grid-template-columns:1fr}}
+  .sidebar{{position:static;height:auto;border-right:none;border-bottom:1px solid var(--border)}}
+  .stats-row{{grid-template-columns:repeat(2,1fr)}}
+}}
+@media(max-width:600px){{
+  .topbar{{padding:12px 14px}}
+  .main{{padding:14px}}
+  .stats-row{{grid-template-columns:1fr 1fr}}
+  #product-grid{{grid-template-columns:1fr}}
+}}
 </style>
 </head>
 <body>
 
-<!-- TOP BAR -->
+<!-- TOPBAR -->
 <div class="topbar">
-  <div class="logo"><span>Idealz</span>.lk — Price Intelligence</div>
-  <div class="topbar-meta">
-    <span class="badge badge-green">LIVE DATA</span>
-    <span class="badge badge-blue">{total:,} VARIANTS TRACKED</span>
-    <span class="date-lbl">{fmt_date.upper()}</span>
+  <div class="logo"><em>Idealz</em>.lk — Price Intelligence</div>
+  <div class="topbar-right">
+    <span class="badge badge-green">LIVE</span>
+    <span class="badge badge-blue" id="total-badge">{total_vars:,} VARIANTS</span>
+    <span class="topbar-date">{fmt_date.upper()}</span>
   </div>
 </div>
 
-<div class="wrap">
+<div class="layout">
 
-  <!-- STAT CARDS -->
-  <div class="stat-grid">
-    <div class="stat-card">
-      <div class="stat-lbl">Total Variants</div>
-      <div class="stat-val">{total:,}</div>
-      <div class="stat-desc">Across all 6 competitors</div>
+  <!-- ═══ SIDEBAR ═══ -->
+  <aside class="sidebar">
+
+    <!-- Search -->
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input type="text" id="search-input" placeholder="Search product..." oninput="applyFilters()">
     </div>
-    <div class="stat-card">
-      <div class="stat-lbl">Brands Tracked</div>
-      <div class="stat-val">{len(all_brands)}</div>
-      <div class="stat-desc">Auto-detected from product names</div>
+
+    <!-- Brand filter -->
+    <div class="filter-section">
+      <span class="filter-label">Brand</span>
+      <div class="pill-wrap" id="brand-pills">{brand_pills}</div>
     </div>
-    <div class="stat-card">
-      <div class="stat-lbl">Price Gap Opportunities</div>
-      <div class="stat-val">{len(price_gaps)}</div>
-      <div class="stat-desc">Products listed by 2+ competitors</div>
+
+    <!-- Category filter -->
+    <div class="filter-section">
+      <span class="filter-label">Category</span>
+      <div class="pill-wrap" id="cat-pills">{cat_pills}</div>
     </div>
-    <div class="stat-card">
-      <div class="stat-lbl">Biggest Price Gap</div>
-      <div class="stat-val" style="font-size:22px;">{"Rs. " + f"{price_gaps[0]['spread']:,}" if price_gaps else "—"}</div>
-      <div class="stat-desc">{price_gaps[0]['label'][:40] if price_gaps else "—"}</div>
+
+    <!-- Storage filter -->
+    <div class="filter-section">
+      <span class="filter-label">Storage</span>
+      <div class="pill-wrap" id="storage-pills">{storage_pills}</div>
     </div>
-  </div>
 
-  <!-- SITE SUMMARY -->
-  <div class="card" style="margin-bottom:20px;">
-    <div class="sec-title">Products Tracked Per Shop</div>
-    <div style="margin-top:10px;">{site_pills}</div>
-  </div>
+    <!-- Shop filter -->
+    <div class="filter-section">
+      <span class="filter-label">Shop</span>
+      <div class="pill-wrap" id="shop-pills">{shop_pills}</div>
+    </div>
 
-  <!-- TABS -->
-  <div class="tabs">
-    <button class="tab active" onclick="showTab('brand',this)">📱 By Brand</button>
-    <button class="tab" onclick="showTab('shop',this)">🏪 By Shop</button>
-    <button class="tab" onclick="showTab('gap',this)">⚡ Price Gaps</button>
-    <button class="tab" onclick="showTab('full',this)">📋 Full List</button>
-  </div>
-
-  <!-- ══ TAB 1: BY BRAND ══ -->
-  <div id="tab-brand" class="tab-panel active">
-    <div class="card">
-      <div class="sec-title">Brand × Shop Price Summary</div>
-      <div class="sec-sub">Every product variant grouped by brand. Green = market lowest price. Red = market highest. Spread = price gap between cheapest and most expensive shop.</div>
-
-      <div class="brand-pills" id="brand-pills-1">{brand_pills}</div>
-
-      <div class="controls">
-        <div class="search-box">
-          <span style="color:#94a3b8;font-size:14px;">🔍</span>
-          <input type="text" placeholder="Search product..." oninput="searchBrand(this.value)" id="brand-search">
-        </div>
-        <select onchange="filterBrandSites(this.value,'brand')">
-          <option value="all">All products</option>
-          <option value="2">On 2+ shops</option>
-          <option value="3">On 3+ shops</option>
-        </select>
-        <select onchange="sortBrand(this.value)">
-          <option value="default">Default order</option>
-          <option value="low">Price low → high</option>
-          <option value="spread">Biggest gap first</option>
-          <option value="az">Name A → Z</option>
-        </select>
-        <div class="cnt">Showing <span id="brand-cnt">{len(brand_summary)}</span> products</div>
-      </div>
-
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th style="min-width:220px;">Product / Variant</th>
-              {site_headers}
-              <th style="text-align:right;border-bottom:2px solid #e2e8f0;">Price Spread</th>
-            </tr>
-          </thead>
-          <tbody id="brand-tbody">{brand_rows_html}</tbody>
-        </table>
+    <!-- Price range -->
+    <div class="filter-section">
+      <span class="filter-label">Price Range (LKR)</span>
+      <div class="range-wrap">
+        <input type="number" id="price-min" placeholder="Min" oninput="applyFilters()" step="10000">
+        <span class="range-sep">—</span>
+        <input type="number" id="price-max" placeholder="Max" oninput="applyFilters()" step="10000">
       </div>
     </div>
-  </div>
 
-  <!-- ══ TAB 2: BY SHOP ══ -->
-  <div id="tab-shop" class="tab-panel">
-    <div class="card">
-      <div class="sec-title">Shop × Brand Comparison</div>
-      <div class="sec-sub">For each brand, see which shops carry it and their price range (lowest → highest variant price). Helps decide where each brand is cheapest.</div>
+    <!-- Sort -->
+    <div class="filter-section">
+      <span class="filter-label">Sort By</span>
+      <select class="sort-select" id="sort-select" onchange="applyFilters()">
+        <option value="shops">Most shops first</option>
+        <option value="price-low">Price: Low to High</option>
+        <option value="price-high">Price: High to Low</option>
+        <option value="spread">Biggest price gap</option>
+        <option value="az">Name A → Z</option>
+      </select>
+    </div>
 
-      <div class="brand-pills" id="brand-pills-2">{brand_pills}</div>
+    <!-- Reset -->
+    <button class="pill" style="width:100%;justify-content:center;padding:8px;border-radius:var(--rad);margin-top:4px" onclick="resetFilters()">
+      ↺ Reset All Filters
+    </button>
 
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th style="min-width:120px;">Brand</th>
-              {site_headers}
-            </tr>
-          </thead>
-          <tbody id="shop-tbody">{shop_brand_html}</tbody>
-        </table>
+    <div class="result-count">Showing <span id="result-count">0</span> products</div>
+
+  </aside>
+
+  <!-- ═══ MAIN CONTENT ═══ -->
+  <main class="main">
+
+    <!-- Stats -->
+    <div class="stats-row">
+      <div class="stat-card" style="--accent-color:var(--accent)">
+        <div class="stat-label">Total Variants</div>
+        <div class="stat-val" id="stat-total">{total_vars:,}</div>
+        <div class="stat-sub">Across all 6 shops</div>
+      </div>
+      <div class="stat-card" style="--accent-color:var(--green)">
+        <div class="stat-label">Unique Products</div>
+        <div class="stat-val" id="stat-products">{len(products):,}</div>
+        <div class="stat-sub">After deduplication</div>
+      </div>
+      <div class="stat-card" style="--accent-color:var(--orange)">
+        <div class="stat-label">Price Gaps Found</div>
+        <div class="stat-val" id="stat-gaps">{sum(1 for p in products if p['site_count']>=2):,}</div>
+        <div class="stat-sub">Listed by 2+ shops</div>
+      </div>
+      <div class="stat-card" style="--accent-color:var(--purple)">
+        <div class="stat-label">Biggest Gap</div>
+        <div class="stat-val" style="font-size:18px" id="stat-maxgap">{"Rs. " + f"{max((p['spread'] for p in products),default=0):,}"}</div>
+        <div class="stat-sub" id="stat-maxgap-name" style="font-size:10px">{next((p['name'][:35] for p in products if p['spread']==max((p['spread'] for p in products),default=0)),"—")}</div>
       </div>
     </div>
-  </div>
 
-  <!-- ══ TAB 3: PRICE GAPS ══ -->
-  <div id="tab-gap" class="tab-panel">
-    <div class="card">
-      <div class="sec-title">⚡ Biggest Price Gaps — CEO Action List</div>
-      <div class="sec-sub">Products where competitors differ most in price. These are your biggest opportunities — price Idealz just below the green (market low) to win customers.</div>
+    <!-- Site coverage -->
+    <div class="site-pills-row">{site_count_pills}</div>
 
-      <div class="brand-pills" id="brand-pills-3">{brand_pills}</div>
+    <!-- View toggle -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div class="view-toggle">
+        <button class="view-btn active" onclick="setView('grid',this)" id="btn-grid">⊞ Cards</button>
+        <button class="view-btn" onclick="setView('table',this)" id="btn-table">≡ Table</button>
+      </div>
+      <div style="font-family:var(--font-m);font-size:11px;color:var(--muted)">
+        <span style="color:var(--green)">■</span> Lowest price &nbsp;
+        <span style="color:var(--red)">■</span> Highest price
+      </div>
+    </div>
 
+    <!-- Product grid -->
+    <div id="product-grid"></div>
+
+    <!-- Table view (hidden by default) -->
+    <div id="table-view" style="display:none">
       <div class="tbl-wrap">
-        <table>
+        <table id="product-table">
           <thead>
             <tr>
-              <th style="width:40px;">#</th>
-              <th>Gap (LKR)</th>
-              <th>Gap %</th>
-              <th style="min-width:200px;">Product</th>
+              <th>Product</th>
               <th>Brand</th>
-              {site_headers}
+              <th>Storage</th>
+              {''.join(f'<th class="site-th" style="color:{SITE_COLORS.get(s,"#999")}">{s}</th>' for s in SITE_ORDER)}
+              <th>Gap</th>
             </tr>
           </thead>
-          <tbody id="gap-tbody">{gap_rows_html}</tbody>
+          <tbody id="table-body"></tbody>
         </table>
       </div>
     </div>
-  </div>
 
-  <!-- ══ TAB 4: FULL LIST ══ -->
-  <div id="tab-full" class="tab-panel">
-    <div class="card">
-      <div class="sec-title">Full Price List — All Variants</div>
-      <div class="sec-sub">Every product, every storage/colour variant, every shop. Search or filter by brand below.</div>
-
-      <div class="brand-pills" id="brand-pills-4">{brand_pills}</div>
-
-      <div class="controls">
-        <div class="search-box">
-          <span style="color:#94a3b8;font-size:14px;">🔍</span>
-          <input type="text" placeholder="Search product or variant..." oninput="searchFull(this.value)" id="full-search">
-        </div>
-        <div class="cnt">Showing <span id="full-cnt">{len(brand_summary)}</span> rows</div>
-      </div>
-
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Brand</th>
-              <th style="min-width:240px;">Product / Variant</th>
-              {site_headers}
-            </tr>
-          </thead>
-          <tbody id="full-tbody">{full_rows_html}</tbody>
-        </table>
-      </div>
+    <!-- Empty state -->
+    <div id="empty-state" style="display:none" class="empty">
+      <div class="empty-icon">🔍</div>
+      <div class="empty-text">No products match your filters.<br>Try adjusting or resetting.</div>
     </div>
-  </div>
 
-</div><!-- /wrap -->
+  </main>
+</div>
 
 <script>
-// ── TAB SWITCHING ─────────────────────────────────────────────────────────────
-function showTab(id, btn) {{
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.getElementById('tab-' + id).classList.add('active');
+// ── EMBEDDED DATA ─────────────────────────────────────────────────────────────
+const ALL_PRODUCTS   = {js_data};
+const SITE_ORDER     = {js_sites};
+const SITE_COLORS    = {js_site_colors};
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let activeBrand   = 'all';
+let activeCat     = 'all';
+let activeStorage = 'all';
+let activeShop    = 'all';
+let currentView   = 'grid';
+let filtered      = [...ALL_PRODUCTS];
+
+// ── FILTER ENGINE ─────────────────────────────────────────────────────────────
+function applyFilters() {{
+  const q        = document.getElementById('search-input').value.toLowerCase().trim();
+  const priceMin = parseFloat(document.getElementById('price-min').value) || 0;
+  const priceMax = parseFloat(document.getElementById('price-max').value) || Infinity;
+  const sortBy   = document.getElementById('sort-select').value;
+
+  filtered = ALL_PRODUCTS.filter(p => {{
+    // Search
+    if (q && !p.name.toLowerCase().includes(q)) return false;
+    // Brand
+    if (activeBrand !== 'all' && p.brand !== activeBrand) return false;
+    // Category
+    if (activeCat !== 'all' && p.category !== activeCat) return false;
+    // Storage
+    if (activeStorage !== 'all') {{
+      if (!p.storage_options.includes(activeStorage)) return false;
+    }}
+    // Shop
+    if (activeShop !== 'all') {{
+      if (!p.sites.includes(activeShop)) return false;
+    }}
+    // Price range — check if any variant fits
+    if (priceMin > 0 || priceMax < Infinity) {{
+      const hasPrice = Object.values(p.variants).some(vdata =>
+        Object.values(vdata).some(info => info.price >= priceMin && info.price <= priceMax)
+      );
+      if (!hasPrice) return false;
+    }}
+    return true;
+  }});
+
+  // Sort
+  filtered.sort((a, b) => {{
+    if (sortBy === 'price-low')  return a.market_low - b.market_low;
+    if (sortBy === 'price-high') return b.market_low - a.market_low;
+    if (sortBy === 'spread')     return b.spread - a.spread;
+    if (sortBy === 'az')         return a.name.localeCompare(b.name);
+    return b.site_count - a.site_count;  // default: most shops first
+  }});
+
+  document.getElementById('result-count').textContent = filtered.length;
+  renderView();
+}}
+
+// ── PILL FILTER HELPERS ───────────────────────────────────────────────────────
+function setPill(containerId, val, type) {{
+  document.querySelectorAll(`#${{containerId}} .pill`).forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  if      (type==='brand')   activeBrand   = val;
+  else if (type==='cat')     activeCat     = val;
+  else if (type==='storage') activeStorage = val;
+  else if (type==='shop')    activeShop    = val;
+  applyFilters();
+}}
+function filterBrand(val,btn)   {{ activeBrand=val;   syncPills('brand-pills',val);   applyFilters(); }}
+function filterCat(val,btn)     {{ activeCat=val;     syncPills('cat-pills',val);     applyFilters(); }}
+function filterStorage(val,btn) {{ activeStorage=val; syncPills('storage-pills',val); applyFilters(); }}
+function filterShop(val,btn)    {{ activeShop=val;    syncPills('shop-pills',val);    applyFilters(); }}
+
+function syncPills(containerId, val) {{
+  document.querySelectorAll(`#${{containerId}} .pill`).forEach(b => {{
+    const bval = b.textContent.trim();
+    b.classList.toggle('active', bval === (val==='all'?'All':val));
+  }});
+}}
+
+function resetFilters() {{
+  activeBrand=activeCat=activeStorage=activeShop='all';
+  document.getElementById('search-input').value='';
+  document.getElementById('price-min').value='';
+  document.getElementById('price-max').value='';
+  document.getElementById('sort-select').value='shops';
+  ['brand-pills','cat-pills','storage-pills','shop-pills'].forEach(id => {{
+    const pills = document.querySelectorAll(`#${{id}} .pill`);
+    pills.forEach((b,i) => b.classList.toggle('active', i===0));
+  }});
+  applyFilters();
+}}
+
+// ── VIEW TOGGLE ───────────────────────────────────────────────────────────────
+function setView(v, btn) {{
+  currentView = v;
+  document.getElementById('product-grid').style.display = v==='grid' ? '' : 'none';
+  document.getElementById('table-view').style.display   = v==='table' ? '' : 'none';
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  renderView();
 }}
 
-// ── BRAND FILTER ──────────────────────────────────────────────────────────────
-let activeBrand = 'all';
-
-function filterBrand(brand, btn) {{
-  activeBrand = brand;
-  // Update all brand pill groups
-  document.querySelectorAll('.bpill').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.bpill').forEach(b => {{
-    if (b.textContent.trim() === (brand === 'all' ? 'All' : brand)) b.classList.add('active');
-  }});
-  applyBrandFilter();
-  applyShopFilter();
-  applyGapFilter();
-  applyFullFilter();
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function renderView() {{
+  if (currentView === 'grid') renderGrid();
+  else renderTable();
+  const empty = document.getElementById('empty-state');
+  empty.style.display = filtered.length === 0 ? '' : 'none';
 }}
 
-function applyBrandFilter() {{
-  const rows = document.querySelectorAll('#brand-tbody .product-row');
-  const headers = document.querySelectorAll('#brand-tbody .brand-header-row');
-  const search = document.getElementById('brand-search')?.value.toLowerCase() || '';
-  let vis = 0;
-  rows.forEach(r => {{
-    const bMatch = activeBrand === 'all' || r.dataset.brand === activeBrand;
-    const sMatch = !search || r.dataset.label.includes(search);
-    r.style.display = bMatch && sMatch ? '' : 'none';
-    if (bMatch && sMatch) vis++;
-  }});
-  headers.forEach(h => {{
-    const bMatch = activeBrand === 'all' || h.dataset.brand === activeBrand;
-    h.style.display = bMatch ? '' : 'none';
-  }});
-  const el = document.getElementById('brand-cnt');
-  if (el) el.textContent = vis;
+function renderGrid() {{
+  const grid = document.getElementById('product-grid');
+  if (filtered.length === 0) {{ grid.innerHTML=''; return; }}
+
+  grid.innerHTML = filtered.map(p => {{
+    // Storage tabs
+    const storages = p.storage_options;
+    const defaultStorage = activeStorage !== 'all' && storages.includes(activeStorage)
+      ? activeStorage : storages[0];
+
+    const storageTabs = storages.length > 1
+      ? `<div class="storage-tabs">${{storages.map(s =>
+          `<button class="storage-tab${{s===defaultStorage?' active':''}}"
+            onclick="switchStorage(this,'${{escJs(p.name)}}','${{escJs(s)}}')">${{s}}</button>`
+        ).join('')}}</div>`
+      : '';
+
+    // Price rows for default storage
+    const vdata   = p.variants[defaultStorage] || {{}};
+    const prices  = Object.values(vdata).map(i=>i.price).filter(Boolean);
+    const pMin    = prices.length ? Math.min(...prices) : null;
+    const pMax    = prices.length ? Math.max(...prices) : null;
+
+    const priceRows = SITE_ORDER.map(site => {{
+      const info = vdata[site];
+      if (!info) return `<div class="price-row">
+        <span class="price-site"><span class="site-dot" style="background:${{SITE_COLORS[site]||'#555'}}"></span>${{site}}</span>
+        <span class="price-na">—</span></div>`;
+
+      const pclass = info.price===pMin && prices.length>1 ? 'price-low'
+                   : info.price===pMax && prices.length>1 ? 'price-high'
+                   : 'price-mid';
+      const priceStr = 'Rs. ' + info.price.toLocaleString();
+      const inner = `<span class="site-dot" style="background:${{SITE_COLORS[site]||'#555'}}"></span>${{site}}`;
+      const val   = `<span class="price-val ${{pclass}}">${{priceStr}}</span>`;
+      return info.url
+        ? `<div class="price-row"><span class="price-site">${{inner}}</span><a href="${{info.url}}" target="_blank" class="price-link">${{val}}</a></div>`
+        : `<div class="price-row"><span class="price-site">${{inner}}</span>${{val}}</div>`;
+    }}).join('');
+
+    const spreadHtml = p.site_count > 1
+      ? `<div class="spread-bar">
+          <span>Price gap across shops</span>
+          <span class="spread-val">Rs. ${{p.spread.toLocaleString()}} (${{p.spread_pct}}%)</span>
+        </div>` : '';
+
+    const sitesBadge = `<span class="sites-badge">${{p.site_count}} shop${{p.site_count!==1?'s':''}}</span>`;
+
+    return `<div class="product-card" data-name="${{escJs(p.name)}}">
+      <div class="card-header">
+        <div class="card-brand">${{p.brand}}</div>
+        <div class="card-name">${{p.name}}</div>
+        <div class="card-meta">
+          <span class="cat-badge">${{p.category}}</span>
+          ${{sitesBadge}}
+        </div>
+      </div>
+      ${{storageTabs}}
+      <div class="price-rows" id="pr-${{safeId(p.name)}}-${{safeId(defaultStorage)}}">${{priceRows}}</div>
+      ${{spreadHtml}}
+    </div>`;
+  }}).join('');
 }}
 
-function applyShopFilter() {{
-  document.querySelectorAll('#shop-tbody .shop-row').forEach(r => {{
-    r.style.display = activeBrand === 'all' || r.dataset.brand === activeBrand ? '' : 'none';
-  }});
+function renderTable() {{
+  const tbody = document.getElementById('table-body');
+  if (filtered.length===0) {{ tbody.innerHTML=''; return; }}
+
+  tbody.innerHTML = filtered.flatMap(p => {{
+    return p.storage_options.map(storage => {{
+      const vdata  = p.variants[storage] || {{}};
+      const prices = Object.values(vdata).map(i=>i.price).filter(Boolean);
+      const pMin   = prices.length ? Math.min(...prices) : null;
+      const pMax   = prices.length ? Math.max(...prices) : null;
+
+      const cells = SITE_ORDER.map(site => {{
+        const info = vdata[site];
+        if (!info) return `<td class="tbl-price"><span style="color:var(--dim)">—</span></td>`;
+        const col = info.price===pMin && prices.length>1 ? 'var(--green)'
+                  : info.price===pMax && prices.length>1 ? 'var(--red)'
+                  : 'var(--text)';
+        const val = `<span style="color:${{col}}">Rs. ${{info.price.toLocaleString()}}</span>`;
+        return info.url
+          ? `<td class="tbl-price"><a href="${{info.url}}" target="_blank" style="text-decoration:none">${{val}}</a></td>`
+          : `<td class="tbl-price">${{val}}</td>`;
+      }}).join('');
+
+      const spread = prices.length>1
+        ? `<span style="color:var(--orange);font-family:var(--font-m);font-size:11px">Rs. ${{(pMax-pMin).toLocaleString()}}</span>`
+        : '<span style="color:var(--dim);font-size:11px">—</span>';
+
+      return `<tr>
+        <td><div class="tbl-name">${{p.name}}</div></td>
+        <td class="tbl-brand">${{p.brand}}</td>
+        <td style="font-family:var(--font-m);font-size:11px;color:var(--muted)">${{storage}}</td>
+        ${{cells}}
+        <td style="text-align:right">${{spread}}</td>
+      </tr>`;
+    }});
+  }}).join('');
 }}
 
-function applyGapFilter() {{
-  document.querySelectorAll('#gap-tbody .gap-row').forEach(r => {{
-    r.style.display = activeBrand === 'all' || r.dataset.brand === activeBrand ? '' : 'none';
-  }});
+// ── STORAGE SWITCH on card ────────────────────────────────────────────────────
+function switchStorage(btn, productName, storage) {{
+  // Update tab active state
+  const card = btn.closest('.product-card');
+  card.querySelectorAll('.storage-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  // Find product
+  const p = ALL_PRODUCTS.find(x => x.name === productName);
+  if (!p) return;
+
+  const vdata  = p.variants[storage] || {{}};
+  const prices = Object.values(vdata).map(i=>i.price).filter(Boolean);
+  const pMin   = prices.length ? Math.min(...prices) : null;
+  const pMax   = prices.length ? Math.max(...prices) : null;
+
+  const rows = SITE_ORDER.map(site => {{
+    const info = vdata[site];
+    if (!info) return `<div class="price-row">
+      <span class="price-site"><span class="site-dot" style="background:${{SITE_COLORS[site]||'#555'}}"></span>${{site}}</span>
+      <span class="price-na">—</span></div>`;
+    const pclass = info.price===pMin && prices.length>1 ? 'price-low'
+                 : info.price===pMax && prices.length>1 ? 'price-high'
+                 : 'price-mid';
+    const val = `<span class="price-val ${{pclass}}">Rs. ${{info.price.toLocaleString()}}</span>`;
+    return info.url
+      ? `<div class="price-row"><span class="price-site"><span class="site-dot" style="background:${{SITE_COLORS[site]||'#555'}}"></span>${{site}}</span><a href="${{info.url}}" target="_blank" class="price-link">${{val}}</a></div>`
+      : `<div class="price-row"><span class="price-site"><span class="site-dot" style="background:${{SITE_COLORS[site]||'#555'}}"></span>${{site}}</span>${{val}}</div>`;
+  }}).join('');
+
+  const priceDiv = card.querySelector('.price-rows');
+  if (priceDiv) priceDiv.innerHTML = rows;
 }}
 
-function applyFullFilter() {{
-  const search = document.getElementById('full-search')?.value.toLowerCase() || '';
-  let vis = 0;
-  document.querySelectorAll('#full-tbody .full-row').forEach(r => {{
-    const bMatch = activeBrand === 'all' || r.dataset.brand === activeBrand;
-    const sMatch = !search || r.dataset.label.includes(search);
-    r.style.display = bMatch && sMatch ? '' : 'none';
-    if (bMatch && sMatch) vis++;
-  }});
-  const el = document.getElementById('full-cnt');
-  if (el) el.textContent = vis;
-}}
+// ── UTILS ─────────────────────────────────────────────────────────────────────
+function escJs(s)  {{ return (s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }}
+function safeId(s) {{ return (s||'').replace(/[^a-z0-9]/gi,'_'); }}
 
-// ── SEARCH ────────────────────────────────────────────────────────────────────
-function searchBrand(q) {{ applyBrandFilter(); }}
-function searchFull(q)  {{ applyFullFilter(); }}
-
-// ── FILTER BY NUMBER OF SITES ─────────────────────────────────────────────────
-function filterBrandSites(val, tab) {{
-  document.querySelectorAll('#brand-tbody .product-row').forEach(r => {{
-    const sites = parseInt(r.dataset.sites || '1');
-    const ok = val === 'all' || sites >= parseInt(val);
-    r.style.display = ok ? '' : 'none';
-  }});
-  applyBrandFilter();
-}}
-
-// ── SORT ──────────────────────────────────────────────────────────────────────
-function sortBrand(val) {{
-  const tbody = document.getElementById('brand-tbody');
-  const rows  = [...tbody.querySelectorAll('.product-row')];
-  rows.sort((a, b) => {{
-    if (val === 'az') return a.dataset.label.localeCompare(b.dataset.label);
-    if (val === 'low') {{
-      const getMin = el => {{
-        const prices = [...el.querySelectorAll('td')].map(td => {{
-          const m = td.textContent.match(/[\d,]{{5,}}/);
-          return m ? parseInt(m[0].replace(/,/g,'')) : Infinity;
-        }});
-        return Math.min(...prices.filter(p => p < Infinity));
-      }};
-      return getMin(a) - getMin(b);
-    }}
-    if (val === 'spread') {{
-      const getSpread = el => {{
-        const last = el.cells[el.cells.length - 1]?.textContent || '';
-        const m = last.match(/[\d,]{{4,}}/);
-        return m ? -parseInt(m[0].replace(/,/g,'')) : 0;
-      }};
-      return getSpread(a) - getSpread(b);
-    }}
-    return 0;
-  }});
-  rows.forEach(r => tbody.appendChild(r));
-}}
+// ── INIT ──────────────────────────────────────────────────────────────────────
+applyFilters();
 </script>
 </body>
 </html>"""
@@ -728,11 +947,9 @@ function sortBrand(val) {{
     return html
 
 
-# ── MAIN ─────────────────────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--open", action="store_true", help="Open in browser after generating")
+    parser.add_argument("--open",     action="store_true")
     parser.add_argument("--data-dir", default="data")
     args = parser.parse_args()
 
@@ -746,14 +963,14 @@ def main():
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
 
-    # Write REPORT_DATE to GitHub Actions environment
+    # GitHub Actions env
     github_env = os.environ.get("GITHUB_ENV")
     if github_env:
         with open(github_env, "a") as f:
             f.write(f"REPORT_DATE={date_str}\n")
 
-    print(f"\n✓ Dashboard saved: {out_path}")
-    print(f"  Records: {len(records)}  |  Date: {date_str}")
+    print(f"\n✓  Dashboard: {out_path}")
+    print(f"   Records : {len(records):,}  |  Date: {date_str}")
 
     if args.open:
         import webbrowser
