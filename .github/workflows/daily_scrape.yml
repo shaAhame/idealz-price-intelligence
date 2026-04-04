@@ -2,11 +2,11 @@ name: Idealz Daily Price Intelligence
 
 on:
   schedule:
-    - cron: '30 3 * * *'   # 9:00 AM Sri Lanka Time (UTC+5:30)
-  workflow_dispatch:
+    - cron: '30 3 * * *'   # 9:00 AM Sri Lanka Time (UTC+5:30) = 03:30 UTC
+  workflow_dispatch:         # Manual trigger button in GitHub UI
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # fixes Node.js deprecation warning
 
 jobs:
   scrape-and-report:
@@ -32,7 +32,7 @@ jobs:
       - name: Install Chromium browser
         run: playwright install chromium --with-deps
 
-      - name: Scrape all competitor sites
+      - name: Scrape all 6 competitor sites
         run: python scraper.py
         env:
           PYTHONUNBUFFERED: "1"
@@ -52,7 +52,7 @@ jobs:
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
           subject: "📊 Idealz Price Intelligence — ${{ env.REPORT_DATE }}"
-          to: shakeebahamed456@gmail.com,irshadatidealz@gmail.com
+          to: shakeebahamed456@gmail.com,irshadatidealz@gmail.com,zaidh.executive@gmail.com
           from: "Idealz Price Bot <${{ secrets.MAIL_USERNAME }}>"
           html_body: file://data/email_report.html
           attachments: data/prices_${{ env.REPORT_DATE }}.csv,data/report_${{ env.REPORT_DATE }}.html
@@ -71,18 +71,16 @@ jobs:
             logs/
           retention-days: 30
 
-      # ✅ Create GitHub Pages homepage (IMPORTANT FIX)
-      - name: Create GitHub Pages index file
-        run: |
-          cp data/report_${{ env.REPORT_DATE }}.html index.html
-          cp data/report_${{ env.REPORT_DATE }}.html data/dashboard.html
+      # ── Copy latest dashboard to fixed filename for GitHub Pages ─────────────
+      - name: Copy dashboard to GitHub Pages fixed URL
+        run: cp data/report_${{ env.REPORT_DATE }}.html data/dashboard.html
 
-      # ✅ Commit all generated files including index.html
+      # ── Commit everything including dashboard.html ───────────────────────────
       - name: Commit scraped data to repo
         run: |
           git config user.name "Idealz Price Bot"
           git config user.email "actions@github.com"
-          git add index.html data/ logs/ || true
+          git add data/ logs/ || true
           git diff --staged --quiet || git commit -m "🤖 Price data: ${{ env.REPORT_DATE }}"
           git push || true
         env:
