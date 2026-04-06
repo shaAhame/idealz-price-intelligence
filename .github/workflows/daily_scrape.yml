@@ -52,7 +52,7 @@ jobs:
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
           subject: "📊 Idealz Price Intelligence — ${{ env.REPORT_DATE }}"
-          to: shakeebahamed456@gmail.com,irshadatidealz@gmail.com,zaidh.executive@gmail.com
+          to: shakeebahamed456@gmail.com,irshadatidealz@gmail.com,zaidh.executive@gmail.com,idealz2022@gmail.com
           from: "Idealz Price Bot <${{ secrets.MAIL_USERNAME }}>"
           html_body: file://data/email_report.html
           attachments: data/prices_${{ env.REPORT_DATE }}.csv,data/report_${{ env.REPORT_DATE }}.html
